@@ -1,5 +1,4 @@
 # 55317A
-Elements of this syllabus are subject to change.
 55317A is the updated version of the retired legacy MOC course 20461. This three-day course teaches students how to use basic Transact-SQL statements and other languages to query modern editions of Microsoft SQL Server and Azure SQL Server. This course is the foundation for all SQL Server-related disciplines; namely, Database Administration, Database Development and Business Intelligence. By using demonstrations and hands-on labs, attendees will learn to perform these tasks using SQL Server, Azure Data Studio, and other database tools.
 
 Audience<br>
@@ -7,14 +6,14 @@ This course is intended for Database Administrators, Database Developers, and Bu
 At Course Completion
 
 After completing this course, students will be able to:<br>
-• Query, sort and filter data in database tables
-• Query external data sources
-• Query SQL Server and Azure SQL Server programmatically
-• Optimize query performance
-• Modify data using Transact-SQL
-• Work with XML and JSON formatted data
-• Use stored procedures and functions
-• Use SQL Server tools like SSMS and Azure Data Studio
-• Use Linked Servers
-• Use PolyBase
+• Query, sort and filter data in database tables<br>
+• Query external data sources<br>
+• Query SQL Server and Azure SQL Server programmatically<br>
+• Optimize query performance<br>
+• Modify data using Transact-SQL<br>
+• Work with XML and JSON formatted data<br>
+• Use stored procedures and functions<br>
+• Use SQL Server tools like SSMS and Azure Data Studio<br>
+• Use Linked Servers<br>
+• Use PolyBase<br>
 
