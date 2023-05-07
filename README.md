@@ -17,3 +17,4 @@ After completing this course, students will be able to:
 • Use SQL Server tools like SSMS and Azure Data Studio
 • Use Linked Servers
 • Use PolyBase
+
