@@ -1,0 +1,127 @@
+### Azure setup script for 55317 course Virtual Machine.  This script creates a Windows Server 2022 Server running SQL Server 2022.  The name of the VM is 55317MIASQL.
+### Updates to class files can be found on GitHub (https://github.com/neiltucker/55317A). 
+
+### Startup Screen
+Clear-Host
+Write-Output "Azure setup script for 55317 course Virtual Machine.  This script creates a Windows Server 2019 Domain Controller running SQL Server 2019.  The name of the VM is 55317MIASQL."
+Write-Output "You must provide your Azure Portal credentials to continue with the setup.  A new Resource Group will be added to your account which will contain all the resources needed for the course VM."
+Write-Output "You may ignore Import-Module errors during the initial stage of the setup."
+Write-Output "The total setup time will be about 60 minutes (15 minutes for the initial local script configuration + 45 minutes for the remote script configuration on the VM in Azure.  Instructions for connecting to the Azure VM will be provided at the end of the initial script setup on the local computer.  Wait at least 45 minutes before using those instructions to connect to the Azure VM."
+
+### Configure Objects & Variables
+# $SubscriptionName = "Azure Pass"                                     # Enable and configure this option if the first subscription in your Azure account is not to be used
+Set-StrictMode -Version 2.0
+Set-Item Env:\SuppressAzurePowerShellBreakingChangeWarnings "true"
+$WorkFolder = "C:\Labfiles.55317\"                                     # 55317A-ENU_PowerShellSetup.zip must be in this location
+$AdventureWorksBackup = "AdventureWorks2019.bak"
+$AdventureWorksDWBackup = "AdventureWorksDW2019.bak"
+Set-Location $WorkFolder
+$SetupFiles = "55317A-ENU_PowerShellSetup.zip"
+Expand-Archive $SetupFiles $WorkFolder -Force -ErrorAction "SilentlyContinue"
+Get-ChildItem -Recurse $WorkFolder | Unblock-File
+$Location = "WESTUS3"
+$NamePrefix = "init" + (Get-Date -Format "HHmmss")     			# Replace "init" with your initials
+$ResourceGroupName = $namePrefix + "rg"
+$StorageAccountName = $namePrefix.tolower() + "sa"                   	# Must be lower case
+$SAShare = "55317"
+$VMDC = "55317MIASQL"
+$PublicIPDCName = "PublicIPDC"
+$PW = Write-Output 'Pa$$w0rdPa$$w0rd' | ConvertTo-SecureString -AsPlainText -Force     # Password for Administrator account
+$AdminCred = New-Object System.Management.Automation.PSCredential("adminz",$PW)
+$CSETMP = $WorkFolder + "55317customscriptextension.tmp"
+$CSENew = $WorkFolder + "55317cse.new"
+
+### Log start time of script
+$logFilePrefix = "55317AzureSetup" + (Get-Date -Format "HHmm") ; $logFileSuffix = ".txt" ; $StartTime = Get-Date 
+"Create Azure VM (55317MIASQL)"   >  $WorkFolder$logFilePrefix$logFileSuffix
+"Start Time: " + $StartTime >> $WorkFolder$logFilePrefix$logFileSuffix
+
+### Install Azure Modules
+If ((Get-PSRepository -Name PSGallery).InstallationPolicy = "Trusted") {Write-Output "PSGallery is already a trusted repository"} Else {Set-PSRepository -Name PSGallery -InstallationPolicy Trusted}
+If (Get-PackageProvider -Name NuGet) {Write-Output "NuGet PackageProvider already installed."} Else {Install-PackageProvider -Name "NuGet" -Force}
+If (Get-Module -ListAvailable -Name PowerShellGet) {Write-Output "PowerShellGet module already installed"} Else {Find-Module PowerShellGet -IncludeDependencies | Install-Module -Force}
+If (Get-Module -ListAvailable -Name SQLServer) {Write-Output "SQLServer module already installed" ; Import-Module SQLServer} Else {Install-Module -Name SQLServer -AllowClobber -Force ; Import-Module -Name SQLServer}
+
+### Login to Azure
+Connect-AzAccount
+$SubscriptionName = (Get-AzSubscription)[0].Name
+$Subscription = Get-AzSubscription -SubscriptionName $SubscriptionName | Select-AzSubscription
+
+### Download AdventureWorks & AdventureWorksDW backup files
+Write-Output "Download AdventureWorks & AdventureWorksDW backup files"
+& $WorkFolder\adventureworks_download.ps1
+& $WorkFolder\adventureworksdw_download.ps1
+
+### Create Resource Group, Storage Account & Setup Resources
+$ResourceGroup = New-AzResourceGroup -Name $ResourceGroupName  -Location $Location
+$StorageAccount = New-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName -Location $location -Type Standard_RAGRS
+$StorageAccountKey = (Get-AzStorageAccountKey -ResourceGroupName $ResourceGroupName -Name $StorageAccountName)[0].Value
+$StorageAccountContext = New-AzStorageContext -StorageAccountName $StorageAccountName -StorageAccountKey $StorageAccountKey
+$BlobShare = New-AzStorageContainer -Name $SAShare.ToLower() -Context $StorageAccountContext -Permission Container -Verbose
+$FileShare = New-AzStorageShare $SAShare.ToLower() -Context $StorageAccountContext
+# Create Custom Script Extension File (CSE)
+Write-Output '### Copy From File Share Using Mapped Network Drive' > $CSENew
+Write-Output "`$WorkFolder = '$WorkFolder' ; `$SAShare = '$SAShare'" >> $CSENew
+Write-Output "`$LabFilesFolder = '$WorkFolder'" >> $CSENew
+Write-Output 'New-Item -Path $WorkFolder -Type Directory -Force' >> $CSENew
+Write-Output "`$StorageAccountName = '$StorageAccountName'" >> $CSENew
+Write-Output "`$StorageAccountKey = '$StorageAccountKey'" >> $CSENew
+Get-Content $CSENew, $CSETMP > 55317customscriptextension.ps1
+Get-ChildItem $WorkFolder"55317customscriptextension.ps1" | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder$SetupFiles | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder$AdventureWorksBackup | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder$AdventureWorksDWBackup | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"SSMS-Setup-ENU.exe" | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"AccessDatabaseEngine_X64.exe" | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"StorageExplorer.exe" | Set-AzStorageBlobContent -Container $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"55317customscriptextension.ps1" | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder$SetupFiles | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder$AdventureWorksBackup | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder$AdventureWorksDWBackup | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"SSMS-Setup-ENU.exe" | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"AccessDatabaseEngine_X64.exe"  | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+Get-ChildItem $WorkFolder"StorageExplorer.exe" | Set-AzStorageFileContent -ShareName $SAShare -Context $StorageAccountContext -Force
+
+### Create Network
+$NSGRule1 = New-AzNetworkSecurityRuleConfig -Name "RDPRule" -Protocol Tcp -Direction Inbound -Priority 1001 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 3389 -Access Allow
+$NSGRule2 = New-AzNetworkSecurityRuleConfig -Name "MSSQLRule"  -Protocol Tcp -Direction Inbound -Priority 1002 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 1433 -Access Allow
+$NSGRule3 = New-AzNetworkSecurityRuleConfig -Name "WinHTTP" -Protocol Tcp -Direction Inbound -Priority 1003 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 5985 -Access Allow
+$NSGRule4 = New-AzNetworkSecurityRuleConfig -Name "WinHTTPS"  -Protocol Tcp -Direction Inbound -Priority 1004 -SourceAddressPrefix * -SourcePortRange * -DestinationAddressPrefix * -DestinationPortRange 5986 -Access Allow
+$NSG1 = New-AzNetworkSecurityGroup -ResourceGroupName $ResourceGroupName -Location $Location -Name "NSG1" -SecurityRules $NSGRule1,$NSGRule2,$NSGRule3,$NSGRule4 -Force
+$Subnet10 = New-AzVirtualNetworkSubnetConfig -Name "Subnet10" -AddressPrefix 192.168.10.0/24
+$Subnet20 = New-AzVirtualNetworkSubnetConfig -Name "Subnet20" -AddressPrefix 192.168.20.0/24 
+$VirtualNetwork1 = New-AzVirtualNetwork -Name "VirtualNetwork1" -ResourceGroupName $ResourceGroupName -Location $Location -AddressPrefix 192.168.0.0/16 -Subnet $Subnet10, $Subnet20 -Force
+$PublicIPDC = New-AzPublicIpAddress -Name $PublicIPDCName -ResourceGroupName $ResourceGroupName -Location $Location -AllocationMethod Static  
+$DCNIC1 = New-AzNetworkInterface -Name "DCNIC1" -ResourceGroupName $ResourceGroupName -Location $Location -PrivateIPAddress 192.168.10.100 -SubnetId $VirtualNetwork1.Subnets[0].Id -PublicIpAddressId $PublicIPDC.Id -NetworkSecurityGroupId $NSG1.Id
+$DCNIC2 = New-AzNetworkInterface -Name "DCNIC2" -ResourceGroupName $ResourceGroupName -Location $Location -PrivateIPAddress 192.168.20.100 -SubnetId $VirtualNetwork1.Subnets[1].Id -NetworkSecurityGroupId $NSG1.Id
+
+### Create VMs
+# SQL Server running on Windows Server
+$PublisherName = "MicrosoftSQLServer"
+$Offer = (Get-AzVMImageOffer -Location $Location -PublisherName $PublisherName | Where-Object {$_.Offer -match "SQL2022-WS2022"})[0].Offer 
+$Skus = (Get-AzVMImagesku -Location $Location -PublisherName $PublisherName -Offer $Offer | Where-Object {$_.Skus -match "SQLDEV"})[0].Skus
+$VMSize = (Get-AzVMSize -Location $Location | Where-Object {$_.Name -match "Standard_DS2"})[0].Name
+$VM1 = New-AzVMConfig -VMName $VMDC -VMSize $VMSize
+$VM1 = Set-AzVMOperatingSystem -VM $VM1 -Windows -ComputerName $VMDC -Credential $AdminCred -WinRMHttp -ProvisionVMAgent -EnableAutoUpdate
+$VM1 = Set-AzVMSourceImage -VM $VM1 -PublisherName $PublisherName -Offer $Offer -Skus $Skus -Version "latest"
+$VM1 = Add-AzVMNetworkInterface -VM $VM1 -ID $DCNIC1.Id -Primary
+$VM1 = Add-AzVMNetworkInterface -VM $VM1 -ID $DCNIC2.Id 
+# $VHDURI1 = (Get-AzStorageAccount -ResourceGroupName $ResourceGroupName -Name $StorageAccountName).PrimaryEndPoints.Blob.ToString() + "vhddc/VHDDC1.vhd"
+$VM1 = Set-AzVMOSDisk -VM $VM1 -Name "VHDSRV1" -DiskSizeInGB 128 -CreateOption FromImage
+$VM1 = Set-AzVMBootDiagnostic -VM $VM1 -Disable  
+New-AzVM -ResourceGroupName $ResourceGroupName -Location $Location -VM $VM1 -Verbose
+Start-AzVM -Name $VMDC -ResourceGroupName $ResourceGroupName
+Set-AzVMCustomScriptExtension -Name "Microsoft.Compute" -TypeHandlerVersion "1.9" -FileName "55317customscriptextension.ps1" -Run "55317customscriptextension.ps1" -ForceRerun $(New-Guid).Guid -ContainerName $SAShare -ResourceGroupName $ResourceGroupName -VMName $VMDC -Location $Location -StorageAccountName $StorageAccountName -StorageAccountKey $StorageAccountKey
+$PublicIPAddress1 = Get-AzPublicIpAddress -Name $PublicIPDCName -ResourceGroupName $ResourceGroupName
+Write-Output "The virtual machine has been created and the local machine portion of the setup is finished.  Wait 45 minutes for the remote part of the setup to complete, and then you may login as Adminz by using Remote Desktop Connection to connect to its Public IP address."
+Write-Output  "Public IP Address for $VMDC is: " $PublicIPAddress1.IpAddress
+
+### Delete Resources and log end time of script
+"55317MIASQL   Internet IP:  " + $PublicIPAddress1.IPAddress >> $WorkFolder$logFilePrefix$logFileSuffix
+"Resource Group Name  :  " + $ResourceGroupName + "   # Delete the Resource Group to remove all Azure resources created by this script (e.g. Remove-AzureRMResourceGroup -Name $ResourceGroupName -Force)"  >> $WorkFolder$logFilePrefix$logFileSuffix
+$EndTime = Get-Date ; $et = "55317AzureSetup" + $EndTime.ToString("yyyyMMddHHmm")
+"End Time:   " + $EndTime >> $WorkFolder$logFilePrefix$logFileSuffix
+"Duration:   " + ($EndTime - $StartTime).TotalMinutes + " (Minutes)" >> $WorkFolder$logFilePrefix$logFileSuffix 
+Rename-Item -Path $WorkFolder$logFilePrefix$logFileSuffix -NewName $et$logFileSuffix
+Get-Content $et$logFileSuffix
+### Remove-AzureRMResourceGroup -Name $ResourceGroupName -Verbose -Force
